@@ -1,0 +1,15 @@
+# Data
+data/
+*.edf
+
+# Models
+*.pkl
+*.model
+
+# Python
+__pycache__/
+*.pyc
+
+# IDEs
+.vscode/
+.idea/

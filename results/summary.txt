@@ -1,0 +1,15 @@
+Accuracy: 0.9234
+Macro F1: 0.7185
+
+Classification Report:
+              precision    recall  f1-score   support
+
+        Wake       0.95      1.00      0.97      2008
+          N1       0.21      0.26      0.23        61
+          N2       0.94      0.88      0.91       485
+          N3       0.81      0.82      0.82        57
+         REM       0.87      0.53      0.66       209
+
+    accuracy                           0.92      2820
+   macro avg       0.76      0.70      0.72      2820
+weighted avg       0.93      0.92      0.92      2820
