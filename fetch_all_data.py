@@ -14,7 +14,7 @@ import mne
 
 # ─── 配置 ──────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent / "data" / "sleep-edf"
-N_SUBJECTS = 20  # max 83
+N_SUBJECTS = int(os.getenv("N_SUBJECTS_FETCH", 20))  # Default 20, override for CI
 
 
 def main():

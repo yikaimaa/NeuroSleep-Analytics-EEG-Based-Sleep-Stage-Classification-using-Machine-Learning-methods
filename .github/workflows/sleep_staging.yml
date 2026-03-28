@@ -1,0 +1,43 @@
+name: Sleep Stage Classification CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  train-and-evaluate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mne xgboost pandas scikit-learn matplotlib seaborn scipy
+
+    - name: Fetch Test Data (2 Subjects)
+      env:
+        N_SUBJECTS_FETCH: 2
+      run: |
+        python fetch_all_data.py
+
+    - name: Run XGBoost Training
+      run: |
+        python src/train_xgboost.py
+
+    - name: Upload Results Snapshot
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: sleep-staging-results
+        path: |
+          results/confusion_matrix.png
+          results/summary.txt
