@@ -10,7 +10,7 @@ on:
 jobs:
   train-and-evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 180
     env:
       PYTHONUNBUFFERED: "1"
 
@@ -29,21 +29,37 @@ jobs:
 
     - name: Fetch Sleep-EDF subset
       env:
-        N_SUBJECTS_FETCH: 4
+        N_SUBJECTS_FETCH: 20
       run: |
         python fetch_all_data.py
 
     - name: Run XGBoost Training
       run: |
-        python src/train_xgboost.py --max-subjects 4 --output-dir results/xgboost
+        python src/train_xgboost.py \
+          --max-subjects 20 \
+          --output-dir results/xgboost
 
     - name: Run Attention Training
       run: |
-        python src/train_attention.py --max-subjects 4 --epochs 1 --batch-size 64 --max-train-batches 2 --max-eval-batches 2 --output-dir results/attention
+        python src/train_attention.py \
+          --max-subjects 20 \
+          --epochs 15 \
+          --batch-size 64 \
+          --learning-rate 1e-3 \
+          --patience 3 \
+          --label-smoothing 0.0 \
+          --output-dir results/attention
 
     - name: Run U-Sleep Training
       run: |
-        python src/train_usleep.py --max-subjects 4 --epochs 1 --batch-size 64 --max-train-batches 2 --max-eval-batches 2 --output-dir results/usleep
+        python src/train_usleep.py \
+          --max-subjects 20 \
+          --epochs 15 \
+          --batch-size 64 \
+          --learning-rate 1e-3 \
+          --patience 3 \
+          --label-smoothing 0.0 \
+          --output-dir results/usleep
 
     - name: Upload Results Snapshot
       uses: actions/upload-artifact@v4
