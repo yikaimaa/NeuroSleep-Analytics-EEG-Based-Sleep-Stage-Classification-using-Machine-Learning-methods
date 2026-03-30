@@ -73,7 +73,7 @@ def main():
     ax.set_ylabel('Number of Epochs')
     for bar in bars:
         height = bar.get_height()
-        ax.annotate(f"{height}\\n({height/len(epochs)*100:.1f}%)", xy=(bar.get_x() + bar.get_width() / 2, height),
+        ax.annotate(f"{height/len(epochs)*100:.1f}%", xy=(bar.get_x() + bar.get_width() / 2, height),
                     xytext=(0, 3), textcoords="offset points", ha='center', va='bottom')
     plt.tight_layout()
     plt.savefig(os.path.join(OUT_DIR, 'sub0_class_distribution.png'), dpi=150)
