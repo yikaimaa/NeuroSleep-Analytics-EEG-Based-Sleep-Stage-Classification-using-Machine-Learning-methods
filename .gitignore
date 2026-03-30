@@ -9,6 +9,10 @@ data/
 # Python
 __pycache__/
 *.pyc
+.venv/
+
+# Local validation outputs
+results/*_smoke/
 
 # IDEs
 .vscode/

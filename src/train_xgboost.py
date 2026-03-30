@@ -1,109 +1,84 @@
-import os
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
-from xgboost import XGBClassifier
-from data_loader import get_all_subjects, load_sleep_edf_subject
-from features import extract_features_all
-from pathlib import Path
+from argparse import ArgumentParser
 
-def train_and_evaluate():
-    data_dir = "data/sleep-edf"
-    subjects = get_all_subjects(data_dir)
+import numpy as np
+from xgboost import XGBClassifier
+
+from training_utils import (
+    load_feature_dataset,
+    save_results,
+    seed_everything,
+    select_subjects,
+    split_subjects,
+    standardize_features,
+    subject_ids,
+)
+
+
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument("--data-dir", default="data/sleep-edf")
+    parser.add_argument("--output-dir", default="results/xgboost")
+    parser.add_argument("--max-subjects", type=int, default=None)
+    parser.add_argument("--test-subjects", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=42)
+    return parser.parse_args()
+
+
+def train_and_evaluate(args):
+    seed_everything(args.seed)
+    subjects = select_subjects(args.data_dir, args.max_subjects)
+    train_subjects, _, test_subjects = split_subjects(
+        subjects,
+        test_subjects=args.test_subjects,
+        val_subjects=0,
+    )
     print(f"Total subjects found: {len(subjects)}")
-    
-    # Subject-level split: 3 subjects for training, 1 for testing
-    # We will use the last subject SC4031 as the test set
-    train_subjects = subjects[:-1]
-    test_subjects = subjects[-1:]
-    
-    X_train_list = []
-    y_train_list = []
-    
+    print(f"Train subjects: {subject_ids(train_subjects)}")
+    print(f"Test subjects: {subject_ids(test_subjects)}")
+
     print("\n[Stage 1] Preprocessing and feature extraction for training set...")
-    for psg, hyp in train_subjects:
-        print(f"  Processing {psg.name}...")
-        X, y, sfreq = load_sleep_edf_subject(psg, hyp)
-        df_feats = extract_features_all(X, sfreq)
-        X_train_list.append(df_feats)
-        y_train_list.append(y)
-        
-    X_train = pd.concat(X_train_list, axis=0)
-    y_train = np.concatenate(y_train_list)
-    
+    X_train, y_train = load_feature_dataset(train_subjects)
+
     print("\n[Stage 2] Preprocessing and feature extraction for test set...")
-    X_test_list = []
-    y_test_list = []
-    for psg, hyp in test_subjects:
-        print(f"  Processing {psg.name}...")
-        X, y, sfreq = load_sleep_edf_subject(psg, hyp)
-        df_feats = extract_features_all(X, sfreq)
-        X_test_list.append(df_feats)
-        y_test_list.append(y)
-        
-    X_test = pd.concat(X_test_list, axis=0)
-    y_test = np.concatenate(y_test_list)
-    
+    X_test, y_test = load_feature_dataset(test_subjects)
+
     print(f"\nTraining set size: {X_train.shape}, Test set size: {X_test.shape}")
     print(f"Class distribution (train): {np.unique(y_train, return_counts=True)}")
-    
-    # Standardize
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Train XGBoost
+
+    X_train_scaled, X_test_scaled = standardize_features(X_train, X_test)
+
     print("\n[Stage 3] Training XGBoost model...")
-    # Use default parameters + some tuning for multi-class classification
     xgb = XGBClassifier(
         n_estimators=200,
         learning_rate=0.1,
         max_depth=6,
-        objective='multi:softprob',
+        objective="multi:softprob",
         num_class=5,
-        random_state=42,
-        eval_metric='mlogloss'
+        random_state=args.seed,
+        eval_metric="mlogloss",
     )
-    
+
     xgb.fit(X_train_scaled, y_train)
-    
-    # Evaluate
+
     print("\n[Stage 4] Evaluating model...")
     y_pred = xgb.predict(X_test_scaled)
-    
-    acc = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred, average='macro')
-    
-    print(f"\nAccuracy: {acc:.4f}")
-    print(f"Macro F1-score: {f1:.4f}")
-    
+
+    metrics = save_results(
+        y_test,
+        y_pred,
+        args.output_dir,
+        "XGBoost",
+        extra_lines=[
+            f"Train subjects: {subject_ids(train_subjects)}",
+            f"Test subjects: {subject_ids(test_subjects)}",
+        ],
+    )
+    print(f"\nAccuracy: {metrics['accuracy']:.4f}")
+    print(f"Macro F1-score: {metrics['macro_f1']:.4f}")
     print("\nClassification Report:")
-    target_names = ['Wake', 'N1', 'N2', 'N3', 'REM']
-    print(classification_report(y_test, y_pred, target_names=target_names))
-    
-    # Confusion Matrix
-    cm = confusion_matrix(y_test, y_pred)
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=target_names, yticklabels=target_names)
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    plt.title(f'Confusion Matrix (XGBoost)\nAccuracy: {acc:.4f}, Macro F1: {f1:.4f}')
-    
-    if not os.path.exists("results"):
-        os.makedirs("results")
-    plt.savefig("results/confusion_matrix.png")
-    print("Saved confusion matrix TO: results/confusion_matrix.png")
-    
-    # Save results summary
-    with open("results/summary.txt", "w") as f:
-        f.write(f"Accuracy: {acc:.4f}\n")
-        f.write(f"Macro F1: {f1:.4f}\n")
-        f.write("\nClassification Report:\n")
-        f.write(classification_report(y_test, y_pred, target_names=target_names))
+    print(metrics["report"])
+    return metrics
+
 
 if __name__ == "__main__":
-    train_and_evaluate()
+    train_and_evaluate(parse_args())

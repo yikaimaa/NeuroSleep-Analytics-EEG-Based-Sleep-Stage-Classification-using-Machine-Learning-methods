@@ -131,7 +131,7 @@ Estimated timeline:
 
 - **2 days**: preprocessing and label preparation
 - **2 days**: feature extraction and SG Boost baseline
-- **3–4 days**: training Attention and U-Sleep models
+- **3-4 days**: training Attention and U-Sleep models
 - **2 days**: evaluation, interpretation, and report writing
 
 Because the dataset is public and already labeled, the main challenge is analysis rather than data collection, making the project feasible within the available timeline.
@@ -155,6 +155,30 @@ This project addresses a practical question with direct value for internal decis
 ├── data/               # Raw or processed dataset files
 ├── notebooks/          # Exploratory analysis and experiments
 ├── src/                # Model training, preprocessing, and evaluation code
+│   ├── train_xgboost.py
+│   ├── train_attention.py
+│   └── train_usleep.py
 ├── results/            # Metrics, figures, and confusion matrices
 ├── reports/            # Final write-up or presentation materials
 └── README.md
+```
+
+## Training Scripts
+
+Run the baseline model:
+
+```bash
+python src/train_xgboost.py --output-dir results/xgboost
+```
+
+Run the Attention-based model:
+
+```bash
+python src/train_attention.py --output-dir results/attention
+```
+
+Run the U-Sleep model:
+
+```bash
+python src/train_usleep.py --output-dir results/usleep
+```
