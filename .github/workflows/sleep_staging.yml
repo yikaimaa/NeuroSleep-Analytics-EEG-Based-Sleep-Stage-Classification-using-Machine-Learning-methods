@@ -34,7 +34,7 @@ jobs:
 
     - name: Fetch Sleep-EDF subset
       env:
-        N_SUBJECTS_FETCH: 10
+        N_SUBJECTS_FETCH: 4
       run: |
         python fetch_all_data.py
 
@@ -47,7 +47,7 @@ jobs:
     - name: Run Attention Training
       run: |
         python src/train_attention.py \
-          --max-subjects 10 \
+          --max-subjects 4 \
           --val-subjects 2 \
           --epochs 15 \
           --batch-size 64 \
@@ -60,7 +60,7 @@ jobs:
     - name: Run U-Sleep Training
       run: |
         python src/train_usleep.py \
-          --max-subjects 10 \
+          --max-subjects 4 \
           --val-subjects 2 \
           --epochs 15 \
           --batch-size 64 \
