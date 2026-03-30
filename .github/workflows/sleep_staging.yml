@@ -10,7 +10,10 @@ on:
 jobs:
   train-and-evaluate:
     runs-on: ubuntu-latest
+<<<<<<< Updated upstream
     timeout-minutes: 240
+=======
+>>>>>>> Stashed changes
     env:
       PYTHONUNBUFFERED: "1"
 
@@ -48,22 +51,38 @@ jobs:
     - name: Run Attention Training
       run: |
         python src/train_attention.py \
+<<<<<<< Updated upstream
           --max-subjects 4 \
+=======
+          --max-subjects 10 \
+          --val-subjects 2 \
+>>>>>>> Stashed changes
           --epochs 15 \
           --batch-size 64 \
           --learning-rate 1e-3 \
           --patience 3 \
+          --num-workers 2 \
+          --learning-rate 5e-4 \
+          --patience 2 \
           --label-smoothing 0.0 \
           --output-dir results/attention
 
     - name: Run U-Sleep Training
       run: |
         python src/train_usleep.py \
+<<<<<<< Updated upstream
           --max-subjects 4 \
+=======
+          --max-subjects 10 \
+          --val-subjects 2 \
+>>>>>>> Stashed changes
           --epochs 15 \
           --batch-size 64 \
           --learning-rate 1e-3 \
           --patience 3 \
+          --num-workers 2 \
+          --learning-rate 5e-4 \
+          --patience 2 \
           --label-smoothing 0.0 \
           --output-dir results/usleep
 

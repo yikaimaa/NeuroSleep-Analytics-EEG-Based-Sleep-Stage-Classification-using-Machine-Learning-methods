@@ -1,13 +1,10 @@
 import json
+import os
 import random
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import torch
 from sklearn.metrics import (
     accuracy_score,
@@ -73,9 +70,10 @@ def subject_ids(subjects):
 def load_feature_dataset(subjects):
     feature_frames = []
     labels = []
+    total_subjects = len(subjects)
 
-    for psg, hyp in subjects:
-        print(f"  Processing {psg.name}...")
+    for idx, (psg, hyp) in enumerate(subjects, start=1):
+        print(f"  [{idx}/{total_subjects}] Processing {psg.name}...")
         X, y, sfreq = load_sleep_edf_subject(psg, hyp)
         feature_frames.append(extract_features_all(X, sfreq))
         labels.append(y)
@@ -88,14 +86,34 @@ def load_raw_dataset(subjects):
     signals = []
     labels = []
     sfreq = None
+    total_subjects = len(subjects)
 
-    for psg, hyp in subjects:
-        print(f"  Processing {psg.name}...")
+    for idx, (psg, hyp) in enumerate(subjects, start=1):
+        print(f"  [{idx}/{total_subjects}] Processing {psg.name}...")
         X, y, sfreq = load_sleep_edf_subject(psg, hyp)
         signals.append(X.astype(np.float32))
         labels.append(y.astype(np.int64))
 
     return np.concatenate(signals, axis=0), np.concatenate(labels), sfreq
+
+
+def load_raw_subject_sequences(subjects):
+    sequences = []
+    sfreq = None
+    total_subjects = len(subjects)
+
+    for idx, (psg, hyp) in enumerate(subjects, start=1):
+        print(f"  [{idx}/{total_subjects}] Processing {psg.name}...")
+        X, y, sfreq = load_sleep_edf_subject(psg, hyp)
+        sequences.append(
+            {
+                "subject_id": psg.name[:6],
+                "X": X.astype(np.float32),
+                "y": y.astype(np.int64),
+            }
+        )
+
+    return sequences, sfreq
 
 
 def standardize_features(X_train, X_test):
@@ -114,6 +132,33 @@ def normalize_epoch_splits(*arrays):
     return normalized, mean, std
 
 
+def flatten_subject_labels(sequences):
+    return np.concatenate([sequence["y"] for sequence in sequences], axis=0)
+
+
+def normalize_sequence_splits(*sequence_groups):
+    train_sequences = sequence_groups[0]
+    train_X = np.concatenate([sequence["X"] for sequence in train_sequences], axis=0)
+    mean = train_X.mean(axis=(0, 2), keepdims=True)
+    std = train_X.std(axis=(0, 2), keepdims=True)
+    std[std < 1e-6] = 1.0
+
+    normalized_groups = []
+    for group in sequence_groups:
+        normalized_group = []
+        for sequence in group:
+            normalized_group.append(
+                {
+                    "subject_id": sequence["subject_id"],
+                    "X": ((sequence["X"] - mean) / std).astype(np.float32),
+                    "y": sequence["y"].copy(),
+                }
+            )
+        normalized_groups.append(normalized_group)
+
+    return normalized_groups, mean, std
+
+
 def compute_class_weights(y):
     counts = np.bincount(y, minlength=NUM_CLASSES)
     total = counts.sum()
@@ -122,7 +167,55 @@ def compute_class_weights(y):
     return torch.tensor(weights, dtype=torch.float32)
 
 
+def estimate_sequence_priors(sequences, smoothing=1.0):
+    start_counts = np.full(NUM_CLASSES, smoothing, dtype=np.float64)
+    transition_counts = np.full((NUM_CLASSES, NUM_CLASSES), smoothing, dtype=np.float64)
+
+    for sequence in sequences:
+        y = sequence["y"]
+        if len(y) == 0:
+            continue
+        start_counts[y[0]] += 1.0
+        if len(y) > 1:
+            for prev_label, next_label in zip(y[:-1], y[1:]):
+                transition_counts[prev_label, next_label] += 1.0
+
+    start_probs = start_counts / start_counts.sum()
+    transition_probs = transition_counts / transition_counts.sum(axis=1, keepdims=True)
+    return np.log(start_probs), np.log(transition_probs)
+
+
+def viterbi_decode(log_probs, start_log_probs, transition_log_probs):
+    if len(log_probs) == 0:
+        return np.array([], dtype=np.int64)
+
+    n_steps, n_states = log_probs.shape
+    dp = np.empty((n_steps, n_states), dtype=np.float64)
+    backpointers = np.zeros((n_steps, n_states), dtype=np.int64)
+    dp[0] = start_log_probs + log_probs[0]
+
+    for step in range(1, n_steps):
+        transition_scores = dp[step - 1][:, None] + transition_log_probs
+        backpointers[step] = transition_scores.argmax(axis=0)
+        dp[step] = transition_scores[backpointers[step], np.arange(n_states)] + log_probs[step]
+
+    states = np.empty(n_steps, dtype=np.int64)
+    states[-1] = dp[-1].argmax()
+    for step in range(n_steps - 2, -1, -1):
+        states[step] = backpointers[step + 1, states[step + 1]]
+    return states
+
+
 def save_results(y_true, y_pred, output_dir, model_name, extra_lines=None):
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-cache")
+    os.environ.setdefault("XDG_CACHE_HOME", "/tmp")
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -198,3 +291,41 @@ class SleepEpochDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
+
+
+class SleepContextDataset(Dataset):
+    def __init__(self, sequences, context_epochs=5):
+        if context_epochs < 1 or context_epochs % 2 == 0:
+            raise ValueError("context_epochs must be a positive odd integer.")
+
+        self.sequences = sequences
+        self.context_epochs = context_epochs
+        self.context_radius = context_epochs // 2
+        self.index = []
+
+        for subject_idx, sequence in enumerate(sequences):
+            for epoch_idx in range(len(sequence["y"])):
+                self.index.append((subject_idx, epoch_idx))
+
+    def __len__(self):
+        return len(self.index)
+
+    def __getitem__(self, idx):
+        subject_idx, epoch_idx = self.index[idx]
+        sequence = self.sequences[subject_idx]
+        X = sequence["X"]
+        y = sequence["y"]
+
+        window_indices = np.arange(
+            epoch_idx - self.context_radius,
+            epoch_idx + self.context_radius + 1,
+        )
+        window_indices = np.clip(window_indices, 0, len(y) - 1)
+        context_window = X[window_indices]
+
+        return (
+            torch.from_numpy(context_window).float(),
+            torch.tensor(y[epoch_idx], dtype=torch.long),
+            torch.tensor(subject_idx, dtype=torch.long),
+            torch.tensor(epoch_idx, dtype=torch.long),
+        )
