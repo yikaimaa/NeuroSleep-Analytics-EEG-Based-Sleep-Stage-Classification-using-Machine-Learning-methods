@@ -59,8 +59,6 @@ jobs:
 >>>>>>> Stashed changes
           --epochs 15 \
           --batch-size 64 \
-          --learning-rate 1e-3 \
-          --patience 3 \
           --num-workers 2 \
           --learning-rate 5e-4 \
           --patience 2 \
@@ -78,8 +76,6 @@ jobs:
 >>>>>>> Stashed changes
           --epochs 15 \
           --batch-size 64 \
-          --learning-rate 1e-3 \
-          --patience 3 \
           --num-workers 2 \
           --learning-rate 5e-4 \
           --patience 2 \
