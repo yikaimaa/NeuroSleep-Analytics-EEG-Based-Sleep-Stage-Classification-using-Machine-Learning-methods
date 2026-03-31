@@ -30,25 +30,25 @@ jobs:
       uses: actions/cache@v4
       with:
         path: data/sleep-edf
-        key: sleep-edf-${{ runner.os }}-4subjects-v1
+        key: sleep-edf-${{ runner.os }}-7subjects-v1
 
     - name: Fetch Sleep-EDF subset
       env:
-        N_SUBJECTS_FETCH: 4
+        N_SUBJECTS_FETCH: 7
       run: |
         python fetch_all_data.py
 
     - name: Run XGBoost Training
       run: |
         python src/train_xgboost.py \
-          --max-subjects 4 \
+          --max-subjects 7 \
           --output-dir results/xgboost
 
     - name: Run Attention Training
       run: |
         python src/train_attention.py \
-          --max-subjects 4 \
-          --val-subjects 2 \
+          --max-subjects 7 \
+          --val-subjects 1 \
           --epochs 15 \
           --batch-size 64 \
           --num-workers 2 \
@@ -60,8 +60,8 @@ jobs:
     - name: Run U-Sleep Training
       run: |
         python src/train_usleep.py \
-          --max-subjects 4 \
-          --val-subjects 2 \
+          --max-subjects 7 \
+          --val-subjects 1 \
           --epochs 15 \
           --batch-size 64 \
           --num-workers 2 \
