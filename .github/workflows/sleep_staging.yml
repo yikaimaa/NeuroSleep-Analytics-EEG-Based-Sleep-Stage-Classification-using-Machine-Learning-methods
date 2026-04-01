@@ -34,20 +34,20 @@ jobs:
 
     - name: Fetch Sleep-EDF subset
       env:
-        N_SUBJECTS_FETCH: 7
+        N_SUBJECTS_FETCH: 6
       run: |
         python fetch_all_data.py
 
     - name: Run XGBoost Training
       run: |
         python src/train_xgboost.py \
-          --max-subjects 7 \
+          --max-subjects 6 \
           --output-dir results/xgboost
 
     - name: Run Attention Training
       run: |
         python src/train_attention.py \
-          --max-subjects 7 \
+          --max-subjects 6 \
           --val-subjects 1 \
           --epochs 15 \
           --batch-size 64 \
@@ -60,7 +60,7 @@ jobs:
     - name: Run U-Sleep Training
       run: |
         python src/train_usleep.py \
-          --max-subjects 7 \
+          --max-subjects 6 \
           --val-subjects 1 \
           --epochs 15 \
           --batch-size 64 \
