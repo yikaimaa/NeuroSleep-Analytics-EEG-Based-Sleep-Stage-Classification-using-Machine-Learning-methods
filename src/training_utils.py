@@ -1,10 +1,14 @@
 import json
-import os
 import random
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import torch
 from sklearn.metrics import (
     accuracy_score,
@@ -44,23 +48,55 @@ def select_subjects(data_dir, max_subjects=None):
     return subjects
 
 
-def split_subjects(subjects, test_subjects=1, val_subjects=0):
-    if len(subjects) <= test_subjects:
+def shuffle_subjects(subjects, seed=42):
+    shuffled = list(subjects)
+    rng = random.Random(seed)
+    rng.shuffle(shuffled)
+    return shuffled
+
+
+def split_subjects(subjects, test_subjects=2, seed=42):
+    if test_subjects < 1:
+        raise ValueError("test_subjects must be at least 1.")
+
+    shuffled = shuffle_subjects(subjects, seed=seed)
+    if len(shuffled) <= test_subjects:
         raise ValueError("Not enough subjects left after reserving the test split.")
 
-    test_split = subjects[-test_subjects:]
-    remaining = subjects[:-test_subjects]
+    test_split = shuffled[:test_subjects]
+    development_split = shuffled[test_subjects:]
+    return development_split, test_split
 
-    if val_subjects > 0:
-        if len(remaining) <= val_subjects:
-            raise ValueError("Not enough subjects left after reserving the validation split.")
-        val_split = remaining[-val_subjects:]
-        train_split = remaining[:-val_subjects]
-    else:
-        val_split = []
-        train_split = remaining
 
-    return train_split, val_split, test_split
+def build_cv_folds(subjects, cv_folds=4, seed=42):
+    if cv_folds < 2:
+        raise ValueError("cv_folds must be at least 2.")
+    if len(subjects) < 2:
+        raise ValueError("At least 2 development subjects are required for cross-validation.")
+
+    shuffled = shuffle_subjects(subjects, seed=seed)
+    actual_folds = min(cv_folds, len(shuffled))
+    fold_sizes = [len(shuffled) // actual_folds] * actual_folds
+    for idx in range(len(shuffled) % actual_folds):
+        fold_sizes[idx] += 1
+
+    folds = []
+    start = 0
+    for fold_idx, fold_size in enumerate(fold_sizes, start=1):
+        stop = start + fold_size
+        val_subjects = shuffled[start:stop]
+        train_subjects = shuffled[:start] + shuffled[stop:]
+        if not train_subjects or not val_subjects:
+            raise ValueError("Each cross-validation fold must contain both train and validation subjects.")
+        folds.append(
+            {
+                "fold": fold_idx,
+                "train_subjects": train_subjects,
+                "val_subjects": val_subjects,
+            }
+        )
+        start = stop
+    return folds
 
 
 def subject_ids(subjects):
@@ -70,10 +106,9 @@ def subject_ids(subjects):
 def load_feature_dataset(subjects):
     feature_frames = []
     labels = []
-    total_subjects = len(subjects)
 
-    for idx, (psg, hyp) in enumerate(subjects, start=1):
-        print(f"  [{idx}/{total_subjects}] Processing {psg.name}...")
+    for psg, hyp in subjects:
+        print(f"  Processing {psg.name}...")
         X, y, sfreq = load_sleep_edf_subject(psg, hyp)
         feature_frames.append(extract_features_all(X, sfreq))
         labels.append(y)
@@ -86,10 +121,9 @@ def load_raw_dataset(subjects):
     signals = []
     labels = []
     sfreq = None
-    total_subjects = len(subjects)
 
-    for idx, (psg, hyp) in enumerate(subjects, start=1):
-        print(f"  [{idx}/{total_subjects}] Processing {psg.name}...")
+    for psg, hyp in subjects:
+        print(f"  Processing {psg.name}...")
         X, y, sfreq = load_sleep_edf_subject(psg, hyp)
         signals.append(X.astype(np.float32))
         labels.append(y.astype(np.int64))
@@ -100,10 +134,9 @@ def load_raw_dataset(subjects):
 def load_raw_subject_sequences(subjects):
     sequences = []
     sfreq = None
-    total_subjects = len(subjects)
 
-    for idx, (psg, hyp) in enumerate(subjects, start=1):
-        print(f"  [{idx}/{total_subjects}] Processing {psg.name}...")
+    for psg, hyp in subjects:
+        print(f"  Processing {psg.name}...")
         X, y, sfreq = load_sleep_edf_subject(psg, hyp)
         sequences.append(
             {
@@ -117,10 +150,17 @@ def load_raw_subject_sequences(subjects):
 
 
 def standardize_features(X_train, X_test):
-    mean = X_train.mean(axis=0, keepdims=True)
-    std = X_train.std(axis=0, keepdims=True)
+    standardized, _, _ = standardize_feature_splits(X_train, X_test)
+    return tuple(standardized)
+
+
+def standardize_feature_splits(*arrays):
+    train = arrays[0]
+    mean = train.mean(axis=0, keepdims=True)
+    std = train.std(axis=0, keepdims=True)
     std[std < 1e-6] = 1.0
-    return ((X_train - mean) / std).astype(np.float32), ((X_test - mean) / std).astype(np.float32)
+    standardized = [((arr - mean) / std).astype(np.float32) for arr in arrays]
+    return standardized, mean.astype(np.float32), std.astype(np.float32)
 
 
 def normalize_epoch_splits(*arrays):
@@ -156,18 +196,25 @@ def normalize_sequence_splits(*sequence_groups):
             )
         normalized_groups.append(normalized_group)
 
-    return normalized_groups, mean, std
+    return normalized_groups, mean.astype(np.float32), std.astype(np.float32)
 
 
-def compute_class_weights(y):
+def compute_class_weights(y, as_tensor=True):
     counts = np.bincount(y, minlength=NUM_CLASSES)
     total = counts.sum()
     safe_counts = np.maximum(counts, 1)
-    weights = total / (NUM_CLASSES * safe_counts)
-    return torch.tensor(weights, dtype=torch.float32)
+    weights = (total / (NUM_CLASSES * safe_counts)).astype(np.float32)
+    if as_tensor:
+        return torch.tensor(weights, dtype=torch.float32)
+    return weights
 
 
-def estimate_sequence_priors(sequences, smoothing=1.0):
+def compute_sample_weights(y):
+    class_weights = compute_class_weights(y, as_tensor=False)
+    return class_weights[y].astype(np.float32)
+
+
+def estimate_hmm_parameters(sequences, smoothing=1.0):
     start_counts = np.full(NUM_CLASSES, smoothing, dtype=np.float64)
     transition_counts = np.full((NUM_CLASSES, NUM_CLASSES), smoothing, dtype=np.float64)
 
@@ -206,19 +253,7 @@ def viterbi_decode(log_probs, start_log_probs, transition_log_probs):
     return states
 
 
-def save_results(y_true, y_pred, output_dir, model_name, extra_lines=None):
-    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-cache")
-    os.environ.setdefault("XDG_CACHE_HOME", "/tmp")
-
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
+def compute_classification_metrics(y_true, y_pred):
     acc = accuracy_score(y_true, y_pred)
     f1 = f1_score(
         y_true,
@@ -234,8 +269,25 @@ def save_results(y_true, y_pred, output_dir, model_name, extra_lines=None):
         target_names=TARGET_NAMES,
         zero_division=0,
     )
-
     cm = confusion_matrix(y_true, y_pred, labels=np.arange(NUM_CLASSES))
+    return {
+        "accuracy": float(acc),
+        "macro_f1": float(f1),
+        "report": report,
+        "confusion_matrix": cm,
+    }
+
+
+def save_results(y_true, y_pred, output_dir, model_name, extra_lines=None, extra_metrics=None):
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    metrics = compute_classification_metrics(y_true, y_pred)
+    acc = metrics["accuracy"]
+    f1 = metrics["macro_f1"]
+    report = metrics["report"]
+    cm = metrics["confusion_matrix"]
+
     plt.figure(figsize=(10, 8))
     sns.heatmap(
         cm,
@@ -270,6 +322,7 @@ def save_results(y_true, y_pred, output_dir, model_name, extra_lines=None):
                 "macro_f1": f1,
                 "labels": TARGET_NAMES,
                 "confusion_matrix": cm.tolist(),
+                "extra_metrics": extra_metrics or {},
             },
             indent=2,
         ),
@@ -278,7 +331,12 @@ def save_results(y_true, y_pred, output_dir, model_name, extra_lines=None):
 
     print(f"Saved confusion matrix to: {output_path / 'confusion_matrix.png'}")
     print(f"Saved summary to: {output_path / 'summary.txt'}")
-    return {"accuracy": acc, "macro_f1": f1, "report": report}
+    return {
+        "accuracy": acc,
+        "macro_f1": f1,
+        "report": report,
+        "confusion_matrix": cm.tolist(),
+    }
 
 
 class SleepEpochDataset(Dataset):
