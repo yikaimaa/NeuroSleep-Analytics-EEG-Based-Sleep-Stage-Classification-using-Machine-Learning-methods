@@ -6,12 +6,23 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      transition_weight:
+        description: "Transition weight for HMM decoding"
+        required: false
+        default: "1.0"
+      transition_smoothing:
+        description: "Transition smoothing for HMM estimation"
+        required: false
+        default: "1.0"
 
 jobs:
   train-and-evaluate:
     runs-on: ubuntu-latest
     env:
       PYTHONUNBUFFERED: "1"
+      TRANSITION_WEIGHT: ${{ github.event.inputs.transition_weight || '1.0' }}
+      TRANSITION_SMOOTHING: ${{ github.event.inputs.transition_smoothing || '1.0' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -19,7 +30,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: "3.10"
 
     - name: Install dependencies
       run: |
@@ -48,31 +59,33 @@ jobs:
       run: |
         python src/train_attention.py \
           --max-subjects 6 \
-          --val-subjects 1 \
           --epochs 15 \
           --batch-size 64 \
           --num-workers 2 \
           --learning-rate 5e-4 \
           --patience 2 \
           --label-smoothing 0.0 \
+          --transition-smoothing ${TRANSITION_SMOOTHING} \
+          --transition-weight ${TRANSITION_WEIGHT} \
           --output-dir results/attention
 
     - name: Run U-Sleep Training
       run: |
         python src/train_usleep.py \
           --max-subjects 6 \
-          --val-subjects 1 \
           --epochs 15 \
           --batch-size 64 \
           --num-workers 2 \
           --learning-rate 5e-4 \
           --patience 2 \
           --label-smoothing 0.0 \
+          --transition-smoothing ${TRANSITION_SMOOTHING} \
+          --transition-weight ${TRANSITION_WEIGHT} \
           --output-dir results/usleep
 
     - name: Upload Results Snapshot
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: sleep-staging-results
+        name: sleep-staging-results-w${{ env.TRANSITION_WEIGHT }}
         path: results/

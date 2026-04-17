@@ -50,6 +50,7 @@ def build_deep_arg_parser(default_output_dir):
     parser.add_argument("--patience", type=int, default=3)
     parser.add_argument("--label-smoothing", type=float, default=0.05)
     parser.add_argument("--transition-smoothing", type=float, default=1.0)
+    parser.add_argument("--transition-weight", type=float, default=1.0)
     parser.add_argument("--max-train-batches", type=int, default=None)
     parser.add_argument("--max-eval-batches", type=int, default=None)
     parser.add_argument("--device", default="auto")
@@ -120,12 +121,21 @@ def metric_snapshot(metrics):
     }
 
 
-def decode_with_hmm(logits, targets, subject_indices, epoch_indices, hmm_parameters):
+def decode_with_hmm(
+    logits,
+    targets,
+    subject_indices,
+    epoch_indices,
+    hmm_parameters,
+    transition_weight=1.0,
+):
     if hmm_parameters is None:
         predictions = logits.argmax(axis=1)
         return targets, predictions, None
 
     start_log_probs, transition_log_probs = hmm_parameters
+    weighted_transition_log_probs = transition_weight * transition_log_probs
+
     ordered_targets = []
     ordered_predictions = []
 
@@ -140,7 +150,7 @@ def decode_with_hmm(logits, targets, subject_indices, epoch_indices, hmm_paramet
         subject_predictions = viterbi_decode(
             subject_log_probs,
             start_log_probs,
-            transition_log_probs,
+            weighted_transition_log_probs,
         )
         ordered_targets.append(subject_targets[order])
         ordered_predictions.append(subject_predictions)
@@ -175,7 +185,15 @@ def train_one_epoch(model, loader, criterion, optimizer, device, max_batches=Non
 
 
 @torch.no_grad()
-def evaluate_model(model, loader, criterion, device, hmm_parameters=None, max_batches=None):
+def evaluate_model(
+    model,
+    loader,
+    criterion,
+    device,
+    hmm_parameters=None,
+    transition_weight=1.0,
+    max_batches=None,
+):
     model.eval()
     total_loss = 0.0
     total_samples = 0
@@ -218,8 +236,10 @@ def evaluate_model(model, loader, criterion, device, hmm_parameters=None, max_ba
         subject_indices,
         epoch_indices,
         hmm_parameters,
+        transition_weight=transition_weight,
     )
     selection_f1 = hmm_metrics["macro_f1"] if hmm_metrics is not None else raw_metrics["macro_f1"]
+
     return {
         "loss": total_loss / max(total_samples, 1),
         "selection_f1": float(selection_f1),
@@ -291,6 +311,7 @@ def run_cross_validation_fold(args, fold_config, model_factory, device):
             criterion,
             device,
             hmm_parameters=hmm_parameters,
+            transition_weight=args.transition_weight,
             max_batches=args.max_eval_batches,
         )
         scheduler.step(val_metrics["selection_f1"])
@@ -330,6 +351,7 @@ def run_cross_validation_fold(args, fold_config, model_factory, device):
         criterion,
         device,
         hmm_parameters=hmm_parameters,
+        transition_weight=args.transition_weight,
         max_batches=args.max_eval_batches,
     )
     return {
@@ -471,6 +493,7 @@ def run_deep_training(args, model_factory, model_name):
         criterion,
         device,
         hmm_parameters=hmm_parameters,
+        transition_weight=args.transition_weight,
         max_batches=args.max_eval_batches,
     )
 
@@ -482,6 +505,8 @@ def run_deep_training(args, model_factory, model_name):
         "mean_hmm_macro_f1": float(np.mean(hmm_scores)) if hmm_scores else None,
         "selected_epochs": selected_epochs,
         "context_epochs": args.context_epochs,
+        "transition_smoothing": float(args.transition_smoothing),
+        "transition_weight": float(args.transition_weight),
         "development_subjects": subject_ids(development_subjects),
         "test_subjects": subject_ids(test_subjects),
         "folds": fold_metrics,
@@ -493,32 +518,56 @@ def run_deep_training(args, model_factory, model_name):
         if test_metrics["hmm_metrics"] is not None
         else None
     )
-    extra_lines = [
+
+    common_lines = [
         f"Cross-validation selection macro F1: {cv_summary['mean_selection_macro_f1']:.4f}",
         f"Cross-validation raw macro F1: {cv_summary['mean_raw_macro_f1']:.4f}",
-        f"Cross-validation HMM macro F1: {cv_summary['mean_hmm_macro_f1']:.4f}" if cv_summary["mean_hmm_macro_f1"] is not None else "Cross-validation HMM macro F1: n/a",
+        (
+            f"Cross-validation HMM macro F1: {cv_summary['mean_hmm_macro_f1']:.4f}"
+            if cv_summary["mean_hmm_macro_f1"] is not None
+            else "Cross-validation HMM macro F1: n/a"
+        ),
         f"Selected final epochs from CV: {selected_epochs}",
         f"Context epochs: {args.context_epochs}",
+        f"Transition smoothing: {args.transition_smoothing:.4f}",
+        f"Transition weight: {args.transition_weight:.4f}",
         f"Test loss: {test_metrics['loss']:.4f}",
-        f"Test raw macro F1: {raw_test_f1:.4f}",
-        f"Test HMM macro F1: {hmm_test_f1:.4f}" if hmm_test_f1 is not None else "Test HMM macro F1: n/a",
-        "Final predictions use HMM/Viterbi decoding estimated from development subjects.",
         f"Sampling rate (Hz): {sfreq}",
         f"Development subjects: {subject_ids(development_subjects)}",
         f"Test subjects: {subject_ids(test_subjects)}",
     ]
     if args.max_train_batches is not None:
-        extra_lines.append(f"Smoke train batch limit: {args.max_train_batches}")
+        common_lines.append(f"Smoke train batch limit: {args.max_train_batches}")
     if args.max_eval_batches is not None:
-        extra_lines.append(f"Smoke eval batch limit: {args.max_eval_batches}")
+        common_lines.append(f"Smoke eval batch limit: {args.max_eval_batches}")
 
-    metrics = save_results(
-        test_metrics["y_true"],
-        test_metrics["y_pred"],
-        args.output_dir,
-        model_name,
-        extra_lines=extra_lines,
+    raw_extra_lines = common_lines + [
+        f"Test raw macro F1: {raw_test_f1:.4f}",
+        "Prediction mode: raw per-epoch argmax (no HMM decoding).",
+    ]
+
+    hmm_extra_lines = common_lines + [
+        f"Test HMM macro F1: {hmm_test_f1:.4f}" if hmm_test_f1 is not None else "Test HMM macro F1: n/a",
+        "Prediction mode: HMM/Viterbi decoding.",
+        "Final predictions use HMM/Viterbi decoding estimated from development subjects.",
+    ]
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_output_dir = output_dir / "raw"
+    hmm_output_dir = output_dir / "hmm"
+
+    raw_metrics_saved = save_results(
+        test_metrics["raw_y_true"],
+        test_metrics["raw_y_pred"],
+        raw_output_dir,
+        f"{model_name} (Raw)",
+        extra_lines=raw_extra_lines,
         extra_metrics={
+            "prediction_mode": "raw",
+            "transition_weight": float(args.transition_weight),
+            "transition_smoothing": float(args.transition_smoothing),
             "cross_validation": cv_summary,
             "test_loss": float(test_metrics["loss"]),
             "raw_test_metrics": metric_snapshot(test_metrics["raw_metrics"]),
@@ -526,8 +575,37 @@ def run_deep_training(args, model_factory, model_name):
         },
     )
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    hmm_metrics_saved = save_results(
+        test_metrics["y_true"],
+        test_metrics["y_pred"],
+        hmm_output_dir,
+        f"{model_name} (HMM)",
+        extra_lines=hmm_extra_lines,
+        extra_metrics={
+            "prediction_mode": "hmm",
+            "transition_weight": float(args.transition_weight),
+            "transition_smoothing": float(args.transition_smoothing),
+            "cross_validation": cv_summary,
+            "test_loss": float(test_metrics["loss"]),
+            "raw_test_metrics": metric_snapshot(test_metrics["raw_metrics"]),
+            "hmm_test_metrics": metric_snapshot(test_metrics["hmm_metrics"]),
+        },
+    )
+
+    comparison = {
+        "model": model_name,
+        "transition_smoothing": float(args.transition_smoothing),
+        "transition_weight": float(args.transition_weight),
+        "test_loss": float(test_metrics["loss"]),
+        "raw_test_metrics": metric_snapshot(test_metrics["raw_metrics"]),
+        "hmm_test_metrics": metric_snapshot(test_metrics["hmm_metrics"]),
+        "cv_summary": cv_summary,
+    }
+
+    (output_dir / "comparison.json").write_text(
+        json.dumps(comparison, indent=2),
+        encoding="utf-8",
+    )
     (output_dir / "cv_summary.json").write_text(json.dumps(cv_summary, indent=2), encoding="utf-8")
 
     torch.save(
@@ -542,6 +620,8 @@ def run_deep_training(args, model_factory, model_name):
             "hmm_decoder": {
                 "start_log_probs": hmm_parameters[0],
                 "transition_log_probs": hmm_parameters[1],
+                "transition_smoothing": float(args.transition_smoothing),
+                "transition_weight": float(args.transition_weight),
             },
             "subjects": {
                 "development": subject_ids(development_subjects),
@@ -552,8 +632,16 @@ def run_deep_training(args, model_factory, model_name):
         },
         output_dir / "model.pt",
     )
+
     print(f"Saved CV summary to: {output_dir / 'cv_summary.json'}")
+    print(f"Saved comparison summary to: {output_dir / 'comparison.json'}")
     print(f"Saved model checkpoint to: {output_dir / 'model.pt'}")
-    print(f"Accuracy: {metrics['accuracy']:.4f}")
-    print(f"Macro F1-score: {metrics['macro_f1']:.4f}")
-    return metrics
+    print(f"Saved raw results to: {raw_output_dir}")
+    print(f"Saved HMM results to: {hmm_output_dir}")
+    print(f"Raw Macro F1-score: {raw_metrics_saved['macro_f1']:.4f}")
+    print(f"HMM Macro F1-score: {hmm_metrics_saved['macro_f1']:.4f}")
+
+    return {
+        "raw": raw_metrics_saved,
+        "hmm": hmm_metrics_saved,
+    }
