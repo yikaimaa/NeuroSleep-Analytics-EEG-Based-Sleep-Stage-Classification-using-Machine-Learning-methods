@@ -35,9 +35,16 @@ def build_deep_arg_parser(default_output_dir):
     parser.add_argument("--max-subjects", type=int, default=None)
     parser.add_argument("--test-subjects", type=int, default=2)
     parser.add_argument("--cv-folds", type=int, default=4)
+    parser.add_argument(
+        "--val-subjects",
+        type=int,
+        default=None,
+        help="Deprecated. Validation subjects are now selected via subject-level cross-validation.",
+    )
     parser.add_argument("--context-epochs", type=int, default=5)
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=3)
@@ -59,11 +66,12 @@ def resolve_device(device_name):
     return torch.device(device_name)
 
 
-def build_loader(dataset, batch_size, shuffle):
+def build_loader(dataset, batch_size, shuffle, num_workers=0):
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
+        num_workers=num_workers,
     )
 
 
@@ -239,8 +247,18 @@ def run_cross_validation_fold(args, fold_config, model_factory, device):
     train_labels = flatten_subject_labels(train_sequences)
     train_dataset = SleepContextDataset(train_sequences, context_epochs=args.context_epochs)
     val_dataset = SleepContextDataset(val_sequences, context_epochs=args.context_epochs)
-    train_loader = build_loader(train_dataset, args.batch_size, shuffle=True)
-    val_loader = build_loader(val_dataset, args.batch_size, shuffle=False)
+    train_loader = build_loader(
+        train_dataset,
+        args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+    )
+    val_loader = build_loader(
+        val_dataset,
+        args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
 
     model = model_factory(
         in_channels=train_sequences[0]["X"].shape[1],
@@ -329,6 +347,12 @@ def run_cross_validation_fold(args, fold_config, model_factory, device):
 
 def run_deep_training(args, model_factory, model_name):
     seed_everything(args.seed)
+    if args.val_subjects is not None:
+        print(
+            "--val-subjects is deprecated and ignored because validation subjects are now "
+            "determined by subject-level cross-validation."
+        )
+
     subjects = select_subjects(args.data_dir, args.max_subjects)
     development_subjects, test_subjects = split_subjects(
         subjects,
@@ -405,8 +429,18 @@ def run_deep_training(args, model_factory, model_name):
         test_sequences,
         context_epochs=args.context_epochs,
     )
-    train_loader = build_loader(development_dataset, args.batch_size, shuffle=True)
-    test_loader = build_loader(test_dataset, args.batch_size, shuffle=False)
+    train_loader = build_loader(
+        development_dataset,
+        args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+    )
+    test_loader = build_loader(
+        test_dataset,
+        args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
 
     model = model_factory(
         in_channels=development_sequences[0]["X"].shape[1],
