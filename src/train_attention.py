@@ -11,7 +11,7 @@ def main():
             in_channels=in_channels,
             num_classes=num_classes,
         ),
-        model_name="Attention-based Model",
+        model_name="Context-aware Attention Model",
     )
 
 

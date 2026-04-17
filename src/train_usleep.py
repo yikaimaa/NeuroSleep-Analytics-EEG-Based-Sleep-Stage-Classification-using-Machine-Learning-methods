@@ -11,7 +11,7 @@ def main():
             in_channels=in_channels,
             num_classes=num_classes,
         ),
-        model_name="U-Sleep Model",
+        model_name="U-Sleep-inspired Context Model",
     )
 
 
