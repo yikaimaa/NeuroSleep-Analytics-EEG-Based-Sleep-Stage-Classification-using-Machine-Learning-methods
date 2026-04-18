@@ -2,23 +2,17 @@ name: Sleep Stage Classification CI
 
 on:
   workflow_dispatch:
-    inputs:
-      transition_weight:
-        description: "Transition weight for HMM decoding"
-        required: false
-        default: "1.0"
-      transition_smoothing:
-        description: "Transition smoothing for HMM estimation"
-        required: false
-        default: "1.0"
 
 jobs:
-  train-and-evaluate:
+  attention-hmm-sweep:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        transition_weight: [0.0, 0.5, 1.0, 2.0]
+
     env:
       PYTHONUNBUFFERED: "1"
-      TRANSITION_WEIGHT: ${{ github.event.inputs.transition_weight || '1.0' }}
-      TRANSITION_SMOOTHING: ${{ github.event.inputs.transition_smoothing || '1.0' }}
+      TRANSITION_SMOOTHING: "1.0"
 
     steps:
     - uses: actions/checkout@v4
@@ -56,12 +50,12 @@ jobs:
           --patience 2 \
           --label-smoothing 0.0 \
           --transition-smoothing ${TRANSITION_SMOOTHING} \
-          --transition-weight ${TRANSITION_WEIGHT} \
-          --output-dir results/attention
+          --transition-weight ${{ matrix.transition_weight }} \
+          --output-dir results/attention_w${{ matrix.transition_weight }}
 
     - name: Upload Results Snapshot
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: sleep-staging-results-w${{ env.TRANSITION_WEIGHT }}
-        path: results/
+        name: attention-results-w${{ matrix.transition_weight }}
+        path: results/attention_w${{ matrix.transition_weight }}/
