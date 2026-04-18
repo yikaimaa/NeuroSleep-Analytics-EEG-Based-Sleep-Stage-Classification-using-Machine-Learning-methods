@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        transition_weight: [0.0, 0.5, 1.0, 2.0]
+        transition_weight: [0.0, 1.0]
 
     env:
       PYTHONUNBUFFERED: "1"
@@ -52,7 +52,6 @@ jobs:
           --transition-smoothing ${TRANSITION_SMOOTHING} \
           --transition-weight ${{ matrix.transition_weight }} \
           --max-train-batches 10 \
-          --max-eval-batches 10 \
           --output-dir results/attention_w${{ matrix.transition_weight }}
 
     - name: Upload Results Snapshot
