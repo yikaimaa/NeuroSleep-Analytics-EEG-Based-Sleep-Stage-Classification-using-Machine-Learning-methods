@@ -1,10 +1,6 @@
 name: Sleep Stage Classification CI
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       transition_weight:
@@ -49,12 +45,6 @@ jobs:
       run: |
         python fetch_all_data.py
 
-    - name: Run XGBoost Training
-      run: |
-        python src/train_xgboost.py \
-          --max-subjects 6 \
-          --output-dir results/xgboost
-
     - name: Run Attention Training
       run: |
         python src/train_attention.py \
@@ -68,20 +58,6 @@ jobs:
           --transition-smoothing ${TRANSITION_SMOOTHING} \
           --transition-weight ${TRANSITION_WEIGHT} \
           --output-dir results/attention
-
-    - name: Run U-Sleep Training
-      run: |
-        python src/train_usleep.py \
-          --max-subjects 6 \
-          --epochs 15 \
-          --batch-size 64 \
-          --num-workers 2 \
-          --learning-rate 5e-4 \
-          --patience 2 \
-          --label-smoothing 0.0 \
-          --transition-smoothing ${TRANSITION_SMOOTHING} \
-          --transition-weight ${TRANSITION_WEIGHT} \
-          --output-dir results/usleep
 
     - name: Upload Results Snapshot
       uses: actions/upload-artifact@v4
