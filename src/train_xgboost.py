@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument("--data-dir", default="data/sleep-edf")
     parser.add_argument("--output-dir", default="results/xgboost")
     parser.add_argument("--max-subjects", type=int, default=None)
-    parser.add_argument("--test-subjects", type=int, default=1)
+    parser.add_argument("--test-subjects", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 

@@ -1,15 +1,18 @@
-Accuracy: 0.9234
-Macro F1: 0.7185
+Model: XGBoost
+Accuracy: 0.9112
+Macro F1: 0.6785
+Train subjects: ['SC4001', 'SC4011', 'SC4021', 'SC4031', 'SC4041', 'SC4051', 'SC4061', 'SC4071']
+Test subjects: ['SC4081', 'SC4091']
 
 Classification Report:
               precision    recall  f1-score   support
 
-        Wake       0.95      1.00      0.97      2008
-          N1       0.21      0.26      0.23        61
-          N2       0.94      0.88      0.91       485
-          N3       0.81      0.82      0.82        57
-         REM       0.87      0.53      0.66       209
+        Wake       0.98      1.00      0.99      3724
+          N1       0.26      0.16      0.20        87
+          N2       0.71      0.86      0.78       823
+          N3       0.92      0.86      0.89       520
+         REM       0.78      0.40      0.53       363
 
-    accuracy                           0.92      2820
-   macro avg       0.76      0.70      0.72      2820
-weighted avg       0.93      0.92      0.92      2820
+    accuracy                           0.91      5517
+   macro avg       0.73      0.66      0.68      5517
+weighted avg       0.91      0.91      0.90      5517
