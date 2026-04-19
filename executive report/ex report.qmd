@@ -1,6 +1,8 @@
 ---
 title: "EEG-Based Sleep Stage Classification"
-format: pdf
+format: 
+  pdf:
+    toc: true
 editor: visual
 ---
 
@@ -93,6 +95,17 @@ Because sleep staging is inherently sequential, we also extend the modeling fram
 The purpose of this extension is to incorporate the fact that sleep stages do not evolve arbitrarily over time. Instead, some transitions are much more plausible than others, and sequence-aware decoding may therefore improve the consistency and realism of the final predictions. The transition weight controls how strongly the decoding process emphasizes transition structure relative to the local class probabilities produced by the neural network.
 
 This sequence-aware component was primarily explored under reduced subject-level cross-validation, where the need for realistic generalization assessment and transition modeling became more important after the progress update.
+
+## 5.4 Experimental Setup and Reproducibility
+
+To support reproducibility while enabling iterative experimentation, we structured the project using separate GitHub branches for different stages of the analysis. The main branch was kept stable and reproducible, containing the original fixed train/validation/test split experiments for both the Attention-based and U-Sleep-inspired models. This branch represents the baseline pipeline used to generate the primary comparison results reported in the earlier stage of the project.
+
+Following feedback from the progress update, we introduced additional branches to support stricter evaluation and sequence-aware modeling. In particular, a dedicated branch named `attention_cv` was created to implement reduced subject-level cross-validation and transition-weight sweeps for the Attention-based model. This branch includes the HMM-based decoding pipeline, where model outputs are combined with a learned transition matrix and decoded using the Viterbi algorithm to incorporate sleep stage dynamics.
+
+Similarly, a separate branch named `u_sleep_cv` was used to run reduced cross-validation experiments for the U-Sleep-inspired model under constrained computational settings. Because these experiments were more computationally intensive and less stable under limited resources, they were isolated from the main branch to avoid affecting the reproducible baseline results.
+
+This branch-based structure allowed us to maintain a clean and reproducible baseline pipeline while continuing to explore more advanced modeling strategies, including subject-level cross-validation and sequence-aware decoding, without introducing inconsistencies into the original experimental setup.
+
 
 # 6. Results
 
