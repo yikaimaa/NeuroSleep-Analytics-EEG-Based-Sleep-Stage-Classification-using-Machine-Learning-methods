@@ -17,3 +17,4 @@ results/*_smoke/
 # IDEs
 .vscode/
 .idea/
+.Rproj.user
