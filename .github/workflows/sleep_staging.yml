@@ -70,9 +70,25 @@ jobs:
           --label-smoothing 0.0 \
           --output-dir results/usleep
 
+    - name: Set up Quarto
+      uses: quarto-dev/quarto-actions/setup@v2
+
+    - name: Install TinyTeX
+      run: quarto install tinytex
+
+    - name: Align results for report
+      run: |
+        mkdir -p results
+        cp results/xgboost/confusion_matrix.png results/confusion_matrix.png
+
+    - name: Render Executive Report
+      run: quarto render "executive report/ex report.qmd" --to pdf
+
     - name: Upload Results Snapshot
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: sleep-staging-results
-        path: results/
+        path: |
+          results/
+          executive report/*.pdf
