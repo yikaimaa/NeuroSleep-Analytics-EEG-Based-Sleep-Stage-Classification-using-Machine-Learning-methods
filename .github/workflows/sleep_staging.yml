@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  attention-hmm-sweep:
+  usleep-cv-hmm:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        transition_weight: [0.5, 2.0]
+        transition_weight: [0.0, 0.5]
 
     env:
       PYTHONUNBUFFERED: "1"
@@ -16,6 +16,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Debug parser version
+      run: |
+        grep -n "transition-weight" src/deep_training.py || true
+        sed -n '1,20p' src/train_usleep.py
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -39,11 +44,13 @@ jobs:
       run: |
         python fetch_all_data.py
 
-    - name: Run Attention Training
+    - name: Run U-Sleep reduced-CV
       run: |
-        python src/train_attention.py \
+        python src/train_usleep.py \
           --max-subjects 6 \
-          --epochs 8 \
+          --test-subjects 2 \
+          --cv-folds 2 \
+          --epochs 4 \
           --batch-size 64 \
           --num-workers 0 \
           --learning-rate 5e-4 \
@@ -52,11 +59,12 @@ jobs:
           --transition-smoothing ${TRANSITION_SMOOTHING} \
           --transition-weight ${{ matrix.transition_weight }} \
           --max-train-batches 10 \
-          --output-dir results/attention_w${{ matrix.transition_weight }}
+          --max-eval-batches 20 \
+          --output-dir results/usleep_cv_w${{ matrix.transition_weight }}
 
     - name: Upload Results Snapshot
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: attention-results-w${{ matrix.transition_weight }}
-        path: results/attention_w${{ matrix.transition_weight }}/
+        name: usleep-cv-w${{ matrix.transition_weight }}
+        path: results/usleep_cv_w${{ matrix.transition_weight }}/
