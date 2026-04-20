@@ -106,8 +106,60 @@ Similarly, a separate branch named `u_sleep_cv` was used to run reduced cross-va
 
 This branch-based structure allowed us to maintain a clean and reproducible baseline pipeline while continuing to explore more advanced modeling strategies, including subject-level cross-validation and sequence-aware decoding, without introducing inconsistencies into the original experimental setup.
 
+# 6. Results and Trade-Offs
 
-# 6. Results
+To make comparisons across models and evaluation settings clearer, Table 1 summarizes the key results discussed in Sections 6.1–6.4. The goal is not to identify a single best model, but to highlight trade-offs between accuracy, macro-level performance, sensitivity to N1, robustness under subject-level evaluation, and compute cost.
+
+This summary highlights the central theme of the results: performance depends strongly on evaluation setting, sequence modeling, and compute constraints, rather than architecture alone.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(knitr)
+library(tibble)
+
+results_tbl <- tribble(
+  ~Section, ~Model, ~Setting, ~Accuracy, ~Macro_F1, ~N1_Recall, ~Note,
+  
+  "6.1", "XGBoost", "Subject-level split", 0.9112, 0.6785, "0.160",
+  "Strong baseline; weakest on N1",
+  
+  "6.2", "Attention", "Fixed-split", 0.8714, 0.7174, "0.750",
+  "Higher N1 recall than U-Sleep-inspired",
+  
+  "6.2", "U-Sleep-inspired", "Fixed-split", 0.8902, 0.7261, "0.660",
+  "Best overall fixed-split deep model",
+  
+  "6.3", "Attention", "Reduced-compute subject-level CV + HMM (w=0.0)", 0.8461, 0.5994, "48/170",
+  "Baseline reduced-CV setting",
+  
+  "6.3", "Attention", "Reduced-compute subject-level CV + HMM (w=0.5)", 0.8600, 0.6069, "27/170",
+  "Best macro F1 under CV",
+  
+  "6.3", "Attention", "Reduced-compute subject-level CV + HMM (w=1.0)", 0.8646, 0.6064, "26/170",
+  "Best accuracy under CV",
+  
+  "6.3", "Attention", "Reduced-compute subject-level CV + HMM (w=2.0)", 0.8541, 0.5828, "22/170",
+  "Over-smoothed; lower macro F1",
+  
+  "6.4", "U-Sleep-inspired", "Reduced-compute subject-level CV + HMM (w=0.0)", 0.2836, 0.1606, "0.790",
+  "Exploratory only; unstable under reduced compute",
+  
+  "6.4", "U-Sleep-inspired", "Reduced-compute subject-level CV + HMM (w=0.5)", 0.4570, 0.1922, "0.000",
+  "Exploratory only; N1 collapsed after HMM"
+) %>%
+  mutate(
+    Accuracy = sprintf("%.4f", Accuracy),
+    Macro_F1 = sprintf("%.4f", Macro_F1)
+  )
+
+kable(
+  results_tbl,
+  col.names = c("Section", "Model", "Setting", "Accuracy", "Macro F1", "N1 Recall", "Notes"),
+  align = c("c", "l", "l", "c", "c", "c", "l"),
+  caption = "Summary of Section 6 results across XGBoost baseline, fixed-split deep models, and reduced-compute subject-level cross-validation with HMM decoding."
+)
+```
+
 
 ## 6.1 XGBoost Baseline Results
 
@@ -123,35 +175,35 @@ Overall, the XGBoost results confirm that feature-based EEG classification provi
 
 ## 6.2 Fixed Train/Test Split Results for Deep Models
 
-We first evaluated the Attention-based model and the U-Sleep-inspired model under a fixed train/validation/test subject split to determine whether EEG-only deep models could learn meaningful multi-class sleep staging behavior. Under this setting, both models performed well overall, and the U-Sleep-inspired model achieved slightly stronger aggregate performance. Specifically, U-Sleep reached an accuracy of 0.8902 and a macro F1 of 0.7261, while the Attention-based model achieved an accuracy of 0.8714 and a macro F1 of 0.7174. These results suggest that U-Sleep is the stronger model on the fixed-split benchmark when performance is summarized by overall accuracy and macro F1.
+We evaluate the Attention model and the U-Sleep-inspired model under a fixed subject-level split. Both models demonstrate strong multi-class learning behavior, and the U-Sleep-inspired model achieves the highest overall performance (accuracy 0.8902, macro F1 0.7261), while the Attention model remains competitive (accuracy 0.8714, macro F1 0.7174).
 
-At the same time, the comparison is not entirely one-sided once attention is given to the minority class N1. Although U-Sleep achieved a slightly higher N1 F1 score, the Attention model achieved higher N1 recall. This indicates that the Attention model was more sensitive to detecting N1 epochs, even if it also produced more false positives, whereas U-Sleep was somewhat more balanced overall. This distinction matters because N1 is both short in duration and clinically difficult to classify, so overall metrics alone do not fully capture the trade-offs between the two architectures.
+However, the comparison changes when focusing on N1. The Attention model achieves higher N1 recall, indicating greater sensitivity to the most difficult and underrepresented stage, while U-Sleep provides more balanced performance across classes. This highlights that aggregate metrics do not fully capture clinically relevant trade-offs.
 
-The fixed-split results also show that the deep models learned meaningful multi-class behavior rather than collapsing to the majority Wake class. In particular, the confusion matrix for the Attention model shows substantial predictions across Wake, N1, N2, N3, and REM, with especially strong performance on N3 and REM. These findings provide an important baseline before moving to stricter subject-level evaluation.
+## 6.3 Reduced-Compute Subject-Level Cross-Validation and HMM Results for Attention
 
-## 6.3 Reduced Subject-Level Cross-Validation and HMM Results for Attention
+We evaluate the Attention model under reduced-compute subject-level cross-validation, which provides a more realistic estimate of generalization than a single split.
 
-Two important issues emerged after the progress update. First, because the dataset contains only 10 subjects, relying solely on a single train/test split is not sufficient for assessing subject-level generalization. Second, sleep staging is inherently sequential, and it is therefore important to consider whether transition-aware decoding can improve performance beyond per-epoch prediction. These concerns motivated the next stage of the experiments: reduced subject-level cross-validation together with HMM-style decoding using the Viterbi algorithm.
+Under this setting, performance drops to accuracy 0.8461 and macro F1 0.5994, confirming that fixed-split results are optimistic in small-subject datasets.
 
-To support this workflow while preserving reproducibility, we created a separate branch for running reduced cross-validation experiments and transition-weight sweeps on the Attention model, while keeping the main branch stable for the original fixed-split experiments. Under this updated pipeline, subjects were divided into a development set and a held-out test set. Cross-validation was then performed within the development subjects, after which the selected configuration was retrained and evaluated on the held-out test subjects. Because of runtime restrictions, these experiments were run under a reduced compute budget, so the results should be interpreted primarily as a stricter generalization check rather than as a fully exhaustive benchmark.
+Adding HMM decoding improves performance under moderate transition weights. Transition weight 0.5 achieves the highest macro F1 (0.6069), while 1.0 achieves the highest accuracy (0.8646). However, stronger transition priors reduce N1 recall from 0.282 to as low as 0.129. This shows a clear trade-off: sequence-aware decoding improves global consistency but suppresses short, difficult stages.
 
-Even under this constrained setting, the reduced-cross-validation Attention baseline with transition weight 0.0 achieved a held-out test accuracy of 0.8461 and a macro F1 of 0.5994. This is lower than the fixed-split result, as expected under a more difficult and more realistic subject-level evaluation setting. The decline reinforces the importance of distinguishing between development performance and generalization to unseen individuals in a small-subject dataset.
+## 6.4 Reduced-Compute Subject-Level Cross-Validation Results for U-Sleep
 
-When HMM-based decoding was added to the Attention model outputs, the results suggest that a moderate transition prior works best. Compared with the baseline at transition weight 0.0, both 0.5 and 1.0 improved overall held-out performance, while 2.0 reduced macro F1. Specifically, transition weight 0.5 achieved an accuracy of 0.8600 and the highest macro F1 of 0.6069. Transition weight 1.0 achieved the highest accuracy at 0.8646, with a macro F1 of 0.6064. Transition weight 2.0 reduced macro F1 to 0.5828 despite maintaining a relatively high accuracy of 0.8541. Because macro F1 is the more appropriate headline metric under severe class imbalance, these results suggest that 0.5 provides the best overall balance among the completed Attention runs, while 2.0 appears to over-constrain the decoding process.
+These runs are exploratory only because the heavier model was trained under capped train and evaluation budgets.
 
-However, the N1 results reveal an important trade-off. Under the reduced-cross-validation baseline with transition weight 0.0, held-out test N1 recall was 48 out of 170, or 0.282. Under transition weight 0.5, N1 recall dropped to 27 out of 170, or 0.159. Under transition weight 1.0, it declined further to 26 out of 170, or 0.153, and under transition weight 2.0, it fell to 22 out of 170, or 0.129. This pattern is consistent with the interpretation that stronger transition priors smooth the sequence in a way that suppresses short-lived N1 predictions. In other words, HMM decoding improves global sequence consistency and modestly improves overall aggregate performance up to a point, but it also reduces sensitivity to the most difficult minority stage. This trade-off is one of the central findings of the project.
+Under reduced-compute subject-level cross-validation, the U-Sleep-inspired model shows unstable and significantly degraded performance compared with the fixed-split setting. Accuracy ranges from 0.2836 to 0.4570 and macro F1 from 0.1606 to 0.1922. While HMM decoding slightly improves aggregate metrics, it leads to severe degradation in N1 recall, including cases where N1 predictions disappear entirely.
 
-## 6.4 Reduced Subject-Level Cross-Validation and HMM Results for U-Sleep
+These results should not be interpreted as a definitive comparison with the Attention model, but rather as evidence that the heavier architecture requires a less constrained compute budget for reliable evaluation.
 
-We also ran reduced subject-level cross-validation experiments for the U-Sleep-inspired model using transition weights 0.0 and 0.5. Under this heavily constrained setting, U-Sleep showed unstable performance and much lower overall metrics than in the fixed-split setting, suggesting that the reduced compute budget was insufficient for a reliable comparison on the heavier architecture.
+## 6.5 Trade-Off Analysis
 
-At transition weight 0.0, the held-out test accuracy was 0.2836 and macro F1 was 0.1606. At transition weight 0.5, accuracy improved to 0.4570 and macro F1 improved to 0.1922. However, N1 recall deteriorated sharply after HMM decoding. At 0.0, N1 recall was 0.79, while at 0.5 it dropped to 0.00 for the HMM-decoded output. This is broadly consistent with the Attention findings that sequence-aware decoding can improve aggregate sequence-level performance while suppressing short, difficult minority stages under constrained settings.
+Across all settings, no single model dominates. XGBoost provides a strong and interpretable baseline but struggles on N1. The U-Sleep-inspired model achieves the best fixed-split performance but requires more compute. The Attention model, particularly with HMM decoding, provides the clearest insight into subject-level generalization and sequence modeling.
 
-Because these U-Sleep cross-validation experiments were conducted under a smoke-style reduced budget and showed considerable instability, they should not be interpreted as a definitive comparison against the Attention model. Rather, they indicate that the heavier architecture likely requires a less constrained training budget before reliable conclusions can be drawn.
+Overall, the results emphasize that conclusions depend critically on evaluation design, sequence modeling assumptions, and compute budget.
 
 # 7. Future Steps
 
-Several important next steps follow naturally from the current findings. The first priority is to extend the stricter subject-level evaluation to the U-Sleep-inspired model under a more appropriate compute budget. In this project, we first carried out the reduced subject-level cross-validation and HMM decoding experiments on the Attention model because of deadline and runtime constraints, while keeping the main branch reproducible for the original fixed-split experiments. Since U-Sleep showed slightly stronger overall fixed-split performance, the next step is to test whether the same transition-aware decoding strategy also improves performance on the stronger model under a stricter evaluation protocol.
+Future work focuses on extending the current findings rather than re-motivating the same design choices. The most important next step is to evaluate the U-Sleep-inspired model under reduced-compute subject-level cross-validation with a sufficient training budget, as current results are inconclusive.
 
 Second, HMM decoding should be explored more systematically on more capable hardware. The completed Attention experiments suggest that a moderate transition prior is most effective. Among the tested settings, transition weight 0.5 achieved the best held-out macro F1, while weight 1.0 achieved the highest accuracy and weight 2.0 appeared to over-smooth the predicted sequence. This suggests that sequence-aware decoding is promising, but that its benefit depends strongly on how much transition structure is imposed. Future work should therefore repeat these experiments under a less constrained compute budget and verify whether the same ranking of transition weights holds under more complete subject-level evaluation.
 
@@ -179,6 +231,8 @@ More broadly, this project also shows how to approach a modeling problem under r
 
 Overall, the study suggests that EEG-only automated sleep staging is viable enough to justify further development, but not yet strong enough to be treated as a solved problem. The strongest overall fixed-split performance came from U-Sleep, the clearest cross-validation and HMM insights came from the Attention model, and the sequence-decoding experiments showed that moderate transition modeling can help while also exposing a meaningful trade-off with N1 sensitivity. The main takeaway is therefore not simply that deeper or more sequence-aware models are better, but that model architecture, validation design, transition modeling, and compute budget all materially shape the conclusions one can draw about sleep staging performance.
 
+For this project, “good enough for further development” is defined as evidence of meaningful multi-class performance under subject-level evaluation together with stable behavior across key sleep stages. Under this definition, the results suggest that EEG-only sleep staging is sufficiently promising to justify continued internal development, but not yet robust enough for deployment without further refinement.
+
 \newpage
 
 # Appendix
@@ -197,12 +251,12 @@ Overall, the feedback led us to improve the project in three main ways: we made 
 
 ## Visualizations
 
-![ Class distribution of sleep stages (Subject SC400).](../data visualization/sub0_class_distribution.png)
+![Class distribution of sleep stages (Subject SC400).](../data%20visualization/sub0_class_distribution.png)
 
-![ Sample hypnogram showing sleep stage transitions over time.](../data visualization/hypnogram.png)
+![Sample hypnogram showing sleep stage transitions over time.](../data%20visualization/hypnogram.png)
 
-![ Representative 30-second EEG segments for different sleep stages.](../data visualization/sample_waveform.png)
+![Representative 30-second EEG segments for different sleep stages.](../data%20visualization/sample_waveform.png)
 
-![ Power Spectral Density (PSD) analysis across sleep stages.](../data visualization/sub0_psd_by_stage.png)
+![Power Spectral Density (PSD) analysis across sleep stages.](../data%20visualization/sub0_psd_by_stage.png)
 
-![ Confusion matrix for the XGBoost baseline model (8/2 split).](../results/confusion_matrix.png)
+![Confusion matrix for the XGBoost baseline model (8/2 split).](../results/confusion_matrix.png)
